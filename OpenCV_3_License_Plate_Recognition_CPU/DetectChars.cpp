@@ -73,7 +73,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         cv::resize(possiblePlate.imgThresh, possiblePlate.imgThresh, cv::Size(), 1.6, 1.6);
 
         // threshold again to eliminate any gray areas
-        cv::threshold(possiblePlate.imgThresh, possiblePlate.imgThresh, 0.0, 255.0, CV_THRESH_BINARY | CV_THRESH_OTSU);
+        cv::threshold(possiblePlate.imgThresh, possiblePlate.imgThresh, 0.0, 255.0, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
 #ifdef SHOW_STEPS
         cv::imshow("5d", possiblePlate.imgThresh);
@@ -84,7 +84,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         std::vector<PossibleChar> vectorOfPossibleCharsInPlate = findPossibleCharsInPlate(possiblePlate.imgGrayscale, possiblePlate.imgThresh);
 
 #ifdef SHOW_STEPS
-        imgContours = cv::Mat(possiblePlate.imgThresh.size(), CV_8UC3, SCALAR_BLACK);
+        imgContours = cv::Mat(possiblePlate.imgThresh.size(), cv::8UC3, SCALAR_BLACK);
         contours.clear();
 
         for (auto &possibleChar : vectorOfPossibleCharsInPlate) {
@@ -100,7 +100,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         std::vector<std::vector<PossibleChar> > vectorOfVectorsOfMatchingCharsInPlate = findVectorOfVectorsOfMatchingChars(vectorOfPossibleCharsInPlate);
 
 #ifdef SHOW_STEPS
-        imgContours = cv::Mat(possiblePlate.imgThresh.size(), CV_8UC3, SCALAR_BLACK);
+        imgContours = cv::Mat(possiblePlate.imgThresh.size(), cv::8UC3, SCALAR_BLACK);
 
         contours.clear();
 
@@ -136,7 +136,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         }
 
 #ifdef SHOW_STEPS
-        imgContours = cv::Mat(possiblePlate.imgThresh.size(), CV_8UC3, SCALAR_BLACK);
+        imgContours = cv::Mat(possiblePlate.imgThresh.size(), cv::8UC3, SCALAR_BLACK);
 
         for (auto &vectorOfMatchingChars : vectorOfVectorsOfMatchingCharsInPlate) {
             int intRandomBlue = rng.uniform(0, 256);
@@ -167,7 +167,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         std::vector<PossibleChar> longestVectorOfMatchingCharsInPlate = vectorOfVectorsOfMatchingCharsInPlate[intIndexOfLongestVectorOfChars];
 
 #ifdef SHOW_STEPS
-        imgContours = cv::Mat(possiblePlate.imgThresh.size(), CV_8UC3, SCALAR_BLACK);
+        imgContours = cv::Mat(possiblePlate.imgThresh.size(), cv::8UC3, SCALAR_BLACK);
 
         contours.clear();
 
@@ -208,7 +208,7 @@ std::vector<PossibleChar> findPossibleCharsInPlate(cv::Mat &imgGrayscale, cv::Ma
 
     imgThreshCopy = imgThresh.clone();				// make a copy of the thresh image, this in necessary b/c findContours modifies the image
 
-    cv::findContours(imgThreshCopy, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);        // find all contours in plate
+    cv::findContours(imgThreshCopy, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);        // find all contours in plate
 
     for (auto &contour : contours) {                            // for each contour
         PossibleChar possibleChar(contour);
@@ -332,7 +332,7 @@ double angleBetweenChars(const PossibleChar &firstChar, const PossibleChar &seco
 
     double dblAngleInRad = atan(dblOpp / dblAdj);
 
-    double dblAngleInDeg = dblAngleInRad * (180.0 / CV_PI);
+    double dblAngleInDeg = dblAngleInRad * (180.0 / M_PI);
 
     return(dblAngleInDeg);
 }
@@ -387,7 +387,7 @@ std::string recognizeCharsInPlate(cv::Mat &imgThresh, std::vector<PossibleChar> 
     // sort chars from left to right
     std::sort(vectorOfMatchingChars.begin(), vectorOfMatchingChars.end(), PossibleChar::sortCharsLeftToRight);
 
-    cv::cvtColor(imgThresh, imgThreshColor, CV_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
+    cv::cvtColor(imgThresh, imgThreshColor, cv::COLOR_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
 
     for (auto &currentChar : vectorOfMatchingChars) {           // for each char in plate
         cv::rectangle(imgThreshColor, currentChar.boundingRect, SCALAR_GREEN, 2);       // draw green box around the char

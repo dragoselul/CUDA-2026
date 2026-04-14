@@ -1,1 +1,44 @@
 *.o
+*.fake
+*.csv
+*.ncu-rep
+*.ncu-rep-*
+*.sqlite
+*.nsys-rep
+.idea
+
+# CMake and build artifacts
+**/build/
+**/build_fresh/
+**/cmake-build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/compile_commands.json
+
+# Local binaries produced in source dirs
+OpenCV_3_License_Plate_Recognition_CPU/LicensePlateRecognition
+OpenCV_3_License_Plate_Recognition_GPU/LicensePlateRecognitionGPU
+
+# IDE/editor settings
+.idea/
+.vscode/
+
+# Nsight and profiling artifacts
+*.ncu-rep*
+*.nsys-rep
+*.sqlite
+*.qdstrm
+**/.tmp_nsys/
+
+# OS/editor temp files
+*.swp
+*.swo
+*~
+
+# Generated reports/output
+Project/ProjectDescription/ProjectDescription.pdf
+out/
+
+# Local datasets
+license-plate-dataset/

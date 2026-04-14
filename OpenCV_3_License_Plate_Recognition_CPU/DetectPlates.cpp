@@ -113,7 +113,7 @@ std::vector<PossibleChar> findPossibleCharsInScene(cv::Mat &imgThresh) {
 
     std::vector<std::vector<cv::Point> > contours;
 
-    cv::findContours(imgThreshCopy, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);        // find all contours
+    cv::findContours(imgThreshCopy, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);        // find all contours
 
     for (unsigned int i = 0; i < contours.size(); i++) {                // for each contour
 #ifdef SHOW_STEPS

@@ -165,7 +165,7 @@ PossiblePlate extractPlate(cv::Mat &imgOriginal, std::vector<PossibleChar> &vect
     double dblOpposite = vectorOfMatchingChars[vectorOfMatchingChars.size() - 1].intCenterY - vectorOfMatchingChars[0].intCenterY;
     double dblHypotenuse = distanceBetweenChars(vectorOfMatchingChars[0], vectorOfMatchingChars[vectorOfMatchingChars.size() - 1]);
     double dblCorrectionAngleInRad = asin(dblOpposite / dblHypotenuse);
-    double dblCorrectionAngleInDeg = dblCorrectionAngleInRad * (180.0 / CV_PI);
+    double dblCorrectionAngleInDeg = dblCorrectionAngleInRad * (180.0 / cv::CV_PI);
 
             // assign rotated rect member variable of possible plate
     possiblePlate.rrLocationOfPlateInScene = cv::RotatedRect(p2dPlateCenter, cv::Size2f((float)intPlateWidth, (float)intPlateHeight), (float)dblCorrectionAngleInDeg);

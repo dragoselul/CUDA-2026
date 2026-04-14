@@ -13,7 +13,7 @@ void preprocess(cv::Mat &imgOriginal, cv::Mat &imgGrayscale, cv::Mat &imgThresh)
     cv::GaussianBlur(imgMaxContrastGrayscale, imgBlurred, GAUSSIAN_SMOOTH_FILTER_SIZE, 0);          // gaussian blur
 
                                                                                                     // call adaptive threshold to get imgThresh
-    cv::adaptiveThreshold(imgBlurred, imgThresh, 255.0, CV_ADAPTIVE_THRESH_GAUSSIAN_C, CV_THRESH_BINARY_INV, ADAPTIVE_THRESH_BLOCK_SIZE, ADAPTIVE_THRESH_WEIGHT);
+    cv::adaptiveThreshold(imgBlurred, imgThresh, 255.0, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY_INV, ADAPTIVE_THRESH_BLOCK_SIZE, ADAPTIVE_THRESH_WEIGHT);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -22,7 +22,7 @@ cv::Mat extractValue(cv::Mat &imgOriginal) {
     std::vector<cv::Mat> vectorOfHSVImages;
     cv::Mat imgValue;
 
-    cv::cvtColor(imgOriginal, imgHSV, CV_BGR2HSV);
+    cv::cvtColor(imgOriginal, imgHSV, cv::COLOR_BGR2HSV);
 
     cv::split(imgHSV, vectorOfHSVImages);
 
@@ -38,10 +38,10 @@ cv::Mat maximizeContrast(cv::Mat &imgGrayscale) {
     cv::Mat imgGrayscalePlusTopHat;
     cv::Mat imgGrayscalePlusTopHatMinusBlackHat;
 
-    cv::Mat structuringElement = cv::getStructuringElement(CV_SHAPE_RECT, cv::Size(3, 3));
+    cv::Mat structuringElement = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
 
-    cv::morphologyEx(imgGrayscale, imgTopHat, CV_MOP_TOPHAT, structuringElement);
-    cv::morphologyEx(imgGrayscale, imgBlackHat, CV_MOP_BLACKHAT, structuringElement);
+    cv::morphologyEx(imgGrayscale, imgTopHat, cv::MORPH_TOPHAT, structuringElement);
+    cv::morphologyEx(imgGrayscale, imgBlackHat, cv::MORPH_BLACKHAT, structuringElement);
 
     imgGrayscalePlusTopHat = imgGrayscale + imgTopHat;
     imgGrayscalePlusTopHatMinusBlackHat = imgGrayscalePlusTopHat - imgBlackHat;

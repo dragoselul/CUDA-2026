@@ -1,0 +1,241 @@
+% ==========================================================
+\section{Project Scope and Method}
+
+\subsection{Statement of the Problem}
+The goal of this project is to design and optimize a CUDA-based license plate detection and character recognition pipeline from an existing OpenCV-based implementation. 
+The main challenge is not only kernel speed, but also maintaining high GPU utilization when processing many images, where host-device transfer latency can reduce the throughput due to transfers on the PCI-e or NVLinks.
+
+The project is organized in phases. It starts from a CPU baseline, then migrates the full detection pipeline to CUDA, introduces dynamic batch sizing, and finally evaluates asynchronous execution and classifier behavior.
+
+\subsection{Fixed Benchmark Protocol}
+To ensure fair comparisons, all devices process the same fixed image set in the same deterministic order. The benchmark set is selected once from the dataset and reused unchanged across runs.
+
+The following metrics are recorded per image and per batch:
+\begin{itemize}
+    % \item End-to-end latency (ms/image and ms/batch)
+    \item Throughput (images/s)
+    \item Stage-level timing (preprocess, plate detection, character detection, KNN)
+    \item Transfer/compute split (H2D, kernel time, D2H)
+    \item Detection output statistics (plates detected, characters recognized)
+\end{itemize}
+
+\subsection{Target Platforms}
+The comparison includes one CPU baseline and three GPU targets:
+\begin{itemize}
+    \item CPU implementation (reference baseline)
+    \item NVIDIA RTX 4070 Max-Q (8 GB, 140 W)
+    \item NVIDIA H100 (PCIe)
+    \item NVIDIA GH200
+\end{itemize}
+
+
+% ==========================================================
+\section{Phase 1: CPU Baseline}
+
+\subsection{Objective}
+Establish a reproducible CPU reference for latency, throughput, and approximate GFLOPS before introducing CUDA-specific optimizations.
+
+\subsection{Implementation}
+The CPU code processes images in a loop and reports per-image statistics using structured timing and aggregate CSV output. This baseline is used as the control implementation for all speedup calculations in later phases.
+
+\subsection{Experiments and Results}
+The fixed benchmark set is executed multiple times to quantify variance. Reported numbers include average, median, and percentile latencies.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+	oprule
+Metric & Mean & Median & P95 \\
+\midrule
+Latency per image (ms) & TBD & TBD & TBD \\
+Throughput (images/s) & TBD & - & - \\
+GFLOPS (estimated) & TBD & - & - \\
+\bottomrule
+\end{tabular}
+\caption{CPU baseline summary on the fixed benchmark image set.}
+\end{table}
+
+% ==========================================================
+\section{Phase 2: Full CUDA Migration of the Pipeline}
+
+\subsection{Objective}
+Port all major stages of the processing chain to CUDA, not only preprocessing, so that the GPU remains active across the end-to-end pipeline minimizing host-device synchronization points.
+
+\subsection{Scope}
+The migration target includes:
+\begin{itemize}
+    \item Image preprocessing (grayscale/value extraction, contrast enhancement, blur, threshold)
+    \item Plate localization stages
+    \item Character extraction stages
+\end{itemize}
+
+% KNN remains a control path at this stage to isolate the impact of the core pipeline migration.
+
+\subsection{Design Considerations}
+The implementation emphasizes data layout, coalesced access, and minimizing host-device synchronization points. Intermediate results should remain on the device whenever possible.
+
+\subsection{Experiments and Results}
+Each migrated stage is validated against CPU output for correctness and compared by stage runtime.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+	oprule
+Stage & CPU Time (ms) & CUDA Time (ms) \\
+\midrule
+Preprocess & TBD & TBD \\
+Plate detection & TBD & TBD \\
+Character detection & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\caption{Stage-level runtime before and after CUDA migration.}
+\end{table}
+
+
+% ==========================================================
+\section{Phase 3: Adaptive Batch Controller}
+
+\subsection{Objective}
+Reduce kernel idle time by dynamically adjusting batch size, keeping the GPU continuously supplied with data while avoiding transfer-side congestion.
+
+\subsection{Controller Strategy}
+The controller uses a global policy shared by all GPUs (extendable later to per-GPU tuning). Batch size can both increase and decrease based on observed transfer and compute behavior.
+
+The controller parameters (growth thresholds, shrink thresholds, smoothing window, and min/max limits) are tuned experimentally.
+
+\begin{lstlisting}[language=C++, caption={Adaptive batch-size controller (high-level logic)}]
+int batchOfImages = 20;
+
+while (has_more_images) {
+    Stats s = run_batch(batchOfImages); // collect H2D, kernel, D2H, total times
+
+    bool gpu_idle = s.kernel_idle_ratio > idle_threshold;
+    bool transfer_limited = s.transfer_ratio > transfer_threshold;
+
+    if (gpu_idle && !transfer_limited) {
+        batchOfImages = min(batchOfImages + step_up, batch_max);
+    } else if (transfer_limited || s.total_latency_ms > latency_target) {
+        batchOfImages = max(batchOfImages - step_down, batch_min);
+    }
+}
+\end{lstlisting}
+
+\subsection{Experiments and Results}
+Batch evolution is logged throughout each run to study convergence and stability.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+	oprule
+Device & Initial Batch & Final Mean Batch & Throughput Gain vs Static \\
+\midrule
+RTX 4070 Max-Q & 20 & TBD & TBD \\
+H100 PCIe & 20 & TBD & TBD \\
+GH200 & 20 & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\caption{Adaptive controller behavior and gain over static batching.}
+\end{table}
+
+
+% ==========================================================
+\section{Phase 4: Asynchronous Pipeline (Single Stream to Multi Stream)}
+
+\subsection{Objective}
+Overlap data movement and compute to further reduce kernel idle periods and improve end-to-end throughput.
+
+\subsection{Execution Path}
+This phase proceeds in two steps:
+\begin{itemize}
+    \item Single-stream baseline: establish synchronized reference with CUDA timing events.
+    \item Multi-stream execution: pipeline H2D transfer, kernel execution, and D2H copy across batches.
+\end{itemize}
+
+\subsection{Expected Effect}
+The expected gain is highest on platforms where transfer overhead is significant. GH200 would show how CPU-GPU coupling changes transfer bottlenecks relative to PCIe devices.
+
+\subsection{Experiments and Results}
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+	oprule
+Device & Single Stream (img/s) & Multi Stream (img/s) & Improvement \\
+\midrule
+RTX 4070 Max-Q & TBD & TBD & TBD \\
+H100 PCIe & TBD & TBD & TBD \\
+GH200 & TBD & TBD & TBD \\
+\bottomrule
+\end{tabular}
+\caption{Throughput impact of asynchronous multi-stream execution.}
+\end{table}
+
+
+% ==========================================================
+% \section{Phase 5: KNN Control and Experiments}
+
+% \subsection{Objective}
+% Use KNN as a controlled reference path, then explore optional optimizations while tracking both accuracy and performance impact.
+
+% \subsection{Plan}
+% Phase 5 is split into two tracks:
+% \begin{itemize}
+%     \item Control track: preserve original KNN behavior for direct comparability with earlier phases.
+%     \item Experimental track: test selective optimizations (data layout, batching of descriptor comparisons, and optional CUDA-assisted variants).
+% \end{itemize}
+
+% \subsection{Evaluation}
+% KNN experiments are accepted only if they preserve detection quality on the fixed benchmark set and improve either latency or throughput.
+
+% \begin{table}[H]
+% \centering
+% \begin{tabular}{lccc}
+% 	oprule
+% KNN Variant & Accuracy Metric & Time per Plate (ms) & Relative Speedup \\
+% \midrule
+% Control (reference) & TBD & TBD & 1.00x \\
+% Experiment A & TBD & TBD & TBD \\
+% Experiment B & TBD & TBD & TBD \\
+% \bottomrule
+% \end{tabular}
+% \caption{KNN control and experiment results.}
+% \end{table}
+
+
+% ==========================================================
+\section{Cross-Device Comparison Summary}
+
+\subsection{Reporting Format}
+Final comparison is presented for the fixed benchmark set across all platforms, using the same controller logic and the same evaluation protocol.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}	
+\toprule
+Platform & Latency (ms/img) & Throughput (img/s) & End-to-End Speedup vs CPU & Notes \\
+\midrule
+CPU baseline & TBD & TBD & 1.00x & reference \\
+RTX 4070 Max-Q & TBD & TBD & TBD & mobile GPU \\
+H100 PCIe & TBD & TBD & TBD & datacenter PCIe \\
+GH200 & TBD & TBD & TBD & CPU-GPU integrated platform \\
+\bottomrule
+\end{tabular}
+\caption{Final platform comparison on a fixed image set.}
+\end{table}
+
+\subsection{Conclusions}
+This phased methodology allows clear attribution of gains: baseline quality and timing from CPU, acceleration from full CUDA migration, 
+utilization improvements from adaptive batching, overlap benefits from asynchronous execution. 
+% and controlled classifier analysis in the final KNN phase.
+
+\subsection*{Addendum: Individual responsibilities in this assignment}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+	extbf{Part} & \textbf{Student No.} & \textbf{Name} \\
+\hline
+I-V & s256878 & Dragos-Daniel Bonaparte \\
+\hline
+\end{tabular}
+\end{table}

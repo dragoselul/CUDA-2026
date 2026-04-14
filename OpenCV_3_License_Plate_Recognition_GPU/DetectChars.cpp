@@ -2,6 +2,27 @@
 
 #include "DetectChars.h"
 
+#include <cstring>
+
+static void copyMatToHostImage(const cv::Mat& src, HostImage& dst) {
+    for (int y = 0; y < src.rows; ++y) {
+        const unsigned char* srcRow = src.ptr<unsigned char>(y);
+        unsigned char* dstRow = dst.data + y * dst.step;
+        std::memcpy(dstRow, srcRow, dst.step);
+    }
+}
+
+static cv::Mat copyHostImageToMat(const HostImage& src) {
+    int type = (src.channels == 1) ? CV_8UC1 : CV_8UC3;
+    cv::Mat dst(src.height, src.width, type);
+    for (int y = 0; y < src.height; ++y) {
+        const unsigned char* srcRow = src.data + y * src.step;
+        unsigned char* dstRow = dst.ptr<unsigned char>(y);
+        std::memcpy(dstRow, srcRow, src.step);
+    }
+    return dst;
+}
+
 // global variables ///////////////////////////////////////////////////////////////////////////////
 cv::Ptr<cv::ml::KNearest> kNearest = cv::ml::KNearest::create();
 
@@ -59,9 +80,24 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
     }
     // at this point we can be sure vector of possible plates has at least one plate
 
-    for (auto &possiblePlate : vectorOfPossiblePlates) {            // for each possible plate, this is a big for loop that takes up most of the function
+    std::vector<HostImage> hostOriginalBatch;
+    hostOriginalBatch.reserve(vectorOfPossiblePlates.size());
 
-        preprocess(possiblePlate.imgPlate, possiblePlate.imgGrayscale, possiblePlate.imgThresh);        // preprocess to get grayscale and threshold images
+    for (auto &possiblePlate : vectorOfPossiblePlates) {
+        hostOriginalBatch.emplace_back(possiblePlate.imgPlate.cols, possiblePlate.imgPlate.rows, possiblePlate.imgPlate.channels());
+        copyMatToHostImage(possiblePlate.imgPlate, hostOriginalBatch.back());
+    }
+
+    std::vector<HostImage> hostGrayscaleBatch;
+    std::vector<HostImage> hostThreshBatch;
+    preprocess(hostOriginalBatch, hostGrayscaleBatch, hostThreshBatch);
+
+    for (size_t plateIdx = 0; plateIdx < vectorOfPossiblePlates.size(); ++plateIdx) {
+        vectorOfPossiblePlates[plateIdx].imgGrayscale = copyHostImageToMat(hostGrayscaleBatch[plateIdx]);
+        vectorOfPossiblePlates[plateIdx].imgThresh = copyHostImageToMat(hostThreshBatch[plateIdx]);
+    }
+
+    for (auto &possiblePlate : vectorOfPossiblePlates) {            // for each possible plate, this is a big for loop that takes up most of the function
 
 #ifdef SHOW_STEPS
         cv::imshow("5a", possiblePlate.imgPlate);
@@ -73,7 +109,7 @@ std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vecto
         cv::resize(possiblePlate.imgThresh, possiblePlate.imgThresh, cv::Size(), 1.6, 1.6);
 
         // threshold again to eliminate any gray areas
-        cv::threshold(possiblePlate.imgThresh, possiblePlate.imgThresh, 0.0, 255.0, CV_THRESH_BINARY | CV_THRESH_OTSU);
+        cv::threshold(possiblePlate.imgThresh, possiblePlate.imgThresh, 0.0, 255.0, cv::THRESH_BINARY | cv::THRESH_OTSU);
 
 #ifdef SHOW_STEPS
         cv::imshow("5d", possiblePlate.imgThresh);
@@ -208,7 +244,7 @@ std::vector<PossibleChar> findPossibleCharsInPlate(cv::Mat &imgGrayscale, cv::Ma
 
     imgThreshCopy = imgThresh.clone();				// make a copy of the thresh image, this in necessary b/c findContours modifies the image
 
-    cv::findContours(imgThreshCopy, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);        // find all contours in plate
+    cv::findContours(imgThreshCopy, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);        // find all contours in plate
 
     for (auto &contour : contours) {                            // for each contour
         PossibleChar possibleChar(contour);
@@ -387,7 +423,7 @@ std::string recognizeCharsInPlate(cv::Mat &imgThresh, std::vector<PossibleChar> 
     // sort chars from left to right
     std::sort(vectorOfMatchingChars.begin(), vectorOfMatchingChars.end(), PossibleChar::sortCharsLeftToRight);
 
-    cv::cvtColor(imgThresh, imgThreshColor, CV_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
+    cv::cvtColor(imgThresh, imgThreshColor, cv::COLOR_GRAY2BGR);       // make color version of threshold image so we can draw contours in color on it
 
     for (auto &currentChar : vectorOfMatchingChars) {           // for each char in plate
         cv::rectangle(imgThreshColor, currentChar.boundingRect, SCALAR_GREEN, 2);       // draw green box around the char

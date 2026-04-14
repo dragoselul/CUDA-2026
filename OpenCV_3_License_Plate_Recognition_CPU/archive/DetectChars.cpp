@@ -331,7 +331,7 @@ double angleBetweenChars(const PossibleChar &firstChar, const PossibleChar &seco
 
     double dblAngleInRad = atan(dblOpp / dblAdj);
 
-    double dblAngleInDeg = dblAngleInRad * (180.0 / CV_PI);
+    double dblAngleInDeg = dblAngleInRad * (180.0 / cv::CV_PI);
 
     return(dblAngleInDeg);
 }

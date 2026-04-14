@@ -2,6 +2,27 @@
 
 #include "DetectPlates.h"
 
+#include <cstring>
+
+static void copyMatToHostImage(const cv::Mat& src, HostImage& dst) {
+    for (int y = 0; y < src.rows; ++y) {
+        const unsigned char* srcRow = src.ptr<unsigned char>(y);
+        unsigned char* dstRow = dst.data + y * dst.step;
+        std::memcpy(dstRow, srcRow, dst.step);
+    }
+}
+
+static cv::Mat copyHostImageToMat(const HostImage& src) {
+    int type = (src.channels == 1) ? CV_8UC1 : CV_8UC3;
+    cv::Mat dst(src.height, src.width, type);
+    for (int y = 0; y < src.height; ++y) {
+        const unsigned char* srcRow = src.data + y * src.step;
+        unsigned char* dstRow = dst.ptr<unsigned char>(y);
+        std::memcpy(dstRow, srcRow, src.step);
+    }
+    return dst;
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 std::vector<PossiblePlate> detectPlatesInScene(cv::Mat &imgOriginalScene) {
     std::vector<PossiblePlate> vectorOfPossiblePlates;			// this will be the return value
@@ -18,7 +39,16 @@ std::vector<PossiblePlate> detectPlatesInScene(cv::Mat &imgOriginalScene) {
     cv::imshow("0", imgOriginalScene);
 #endif	// SHOW_STEPS
 
-    preprocess(imgOriginalScene, imgGrayscaleScene, imgThreshScene);        // preprocess to get grayscale and threshold images
+    std::vector<HostImage> hostOriginalBatch;
+    hostOriginalBatch.emplace_back(imgOriginalScene.cols, imgOriginalScene.rows, imgOriginalScene.channels());
+    copyMatToHostImage(imgOriginalScene, hostOriginalBatch[0]);
+
+    std::vector<HostImage> hostGrayscaleBatch;
+    std::vector<HostImage> hostThreshBatch;
+    preprocess(hostOriginalBatch, hostGrayscaleBatch, hostThreshBatch);  // preprocess to get grayscale and threshold images
+
+    imgGrayscaleScene = copyHostImageToMat(hostGrayscaleBatch[0]);
+    imgThreshScene = copyHostImageToMat(hostThreshBatch[0]);
 
 #ifdef SHOW_STEPS
     cv::imshow("1a", imgGrayscaleScene);
@@ -113,7 +143,7 @@ std::vector<PossibleChar> findPossibleCharsInScene(cv::Mat &imgThresh) {
 
     std::vector<std::vector<cv::Point> > contours;
 
-    cv::findContours(imgThreshCopy, contours, CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);        // find all contours
+    cv::findContours(imgThreshCopy, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);        // find all contours
 
     for (unsigned int i = 0; i < contours.size(); i++) {                // for each contour
 #ifdef SHOW_STEPS

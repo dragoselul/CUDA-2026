@@ -10,7 +10,7 @@
 #include "Main.h"
 #include "PossiblePlate.h"
 #include "PossibleChar.h"
-#include "Preprocess.h"
+#include "Preprocess.cuh"
 #include "DetectChars.h"
 
 // global constants ///////////////////////////////////////////////////////////////////////////////

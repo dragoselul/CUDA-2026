@@ -1,67 +1,211 @@
 // Main.cpp
 
 #include "Main.h"
+#include "timing_utils.h"
+#include <iostream>
+#include <iomanip>
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
+
+namespace fs = std::filesystem;
+
+static bool isSupportedImageExtension(const fs::path &path) {
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return (char) std::tolower(c); });
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp";
+}
+
+static std::vector<std::string> collectImagePaths(const std::string &inputPath) {
+    std::vector<std::string> imagePaths;
+
+    fs::path path(inputPath);
+    if (fs::exists(path)) {
+        if (fs::is_regular_file(path)) {
+            if (isSupportedImageExtension(path)) {
+                imagePaths.push_back(path.string());
+            }
+            return imagePaths;
+        }
+
+        if (fs::is_directory(path)) {
+            for (const auto &entry : fs::directory_iterator(path)) {
+                if (entry.is_regular_file() && isSupportedImageExtension(entry.path())) {
+                    imagePaths.push_back(entry.path().string());
+                }
+            }
+            std::sort(imagePaths.begin(), imagePaths.end());
+            return imagePaths;
+        }
+    }
+
+    std::vector<cv::String> globMatches;
+    cv::glob(inputPath, globMatches, false);
+    for (const auto &match : globMatches) {
+        imagePaths.emplace_back(match);
+    }
+    std::sort(imagePaths.begin(), imagePaths.end());
+
+    return imagePaths;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-int main(void) {
+int main(int argc, char** argv) {
 
     bool blnKNNTrainingSuccessful = loadKNNDataAndTrainKNN();           // attempt KNN training
 
     if (blnKNNTrainingSuccessful == false) {                            // if KNN training was not successful
                                                                         // show error message
-        std::cout << std::endl << std::endl << "error: error: KNN traning was not successful" << std::endl << std::endl;
+        std::cout << std::endl << std::endl << "error: KNN training was not successful" << std::endl << std::endl;
         return(0);                                                      // and exit program
     }
 
-    cv::Mat imgOriginalScene;           // input image
-
-    imgOriginalScene = cv::imread("image1.png");         // open image
-
-    if (imgOriginalScene.empty()) {                             // if unable to open image
-        std::cout << "error: image not read from file\n\n";     // show error message on command line
-        _getch();                                               // may have to modify this line if not using Windows
-        return(0);                                              // and exit program
+    std::vector<std::string> imagePaths;
+    if (argc > 1) {
+        imagePaths = collectImagePaths(argv[1]);
+    } else {
+        imagePaths = collectImagePaths("image*.png");
+        if (imagePaths.empty()) {
+            imagePaths = collectImagePaths("../image*.png");
+        }
     }
 
-    std::vector<PossiblePlate> vectorOfPossiblePlates = detectPlatesInScene(imgOriginalScene);          // detect plates
-
-    vectorOfPossiblePlates = detectCharsInPlates(vectorOfPossiblePlates);                               // detect chars in plates
-
-    cv::imshow("imgOriginalScene", imgOriginalScene);           // show scene image
-
-    if (vectorOfPossiblePlates.empty()) {                                               // if no plates were found
-        std::cout << std::endl << "no license plates were detected" << std::endl;       // inform user no plates were found
+    if (imagePaths.empty()) {
+        std::cerr << "Error: No input images found." << std::endl;
+        std::cerr << "Usage: " << argv[0] << " [image_file|images_dir|glob_pattern] [csv_output]" << std::endl;
+        std::cerr << "Example: " << argv[0] << " ../image*.png" << std::endl;
+        std::cerr << "Example: " << argv[0] << " ../" << std::endl;
+        return(1);
     }
-    else {                                                                            // else
-                                                                                      // if we get in here vector of possible plates has at leat one plate
 
-                                                                                      // sort the vector of possible plates in DESCENDING order (most number of chars to least number of chars)
-        std::sort(vectorOfPossiblePlates.begin(), vectorOfPossiblePlates.end(), PossiblePlate::sortDescendingByNumberOfChars);
+    std::string csvOutput = (argc > 2) ? argv[2] : "license_plate_cpu_baseline.csv";
+    std::string summaryCsvOutput = (argc > 3) ? argv[3] : "license_plate_cpu_summary.csv";
 
-        // suppose the plate with the most recognized chars (the first plate in sorted by string length descending order) is the actual plate
-        PossiblePlate licPlate = vectorOfPossiblePlates.front();
+    std::cout << "Running CPU image benchmark on " << imagePaths.size() << " image(s)" << std::endl;
+    std::cout << "Execution mode: CPU (no cv::cuda path in this target)" << std::endl;
+    std::cout << "Starting image processing..." << std::endl;
 
-        cv::imshow("imgPlate", licPlate.imgPlate);            // show crop of plate and threshold of plate
-        cv::imshow("imgThresh", licPlate.imgThresh);
+    // Performance reporting
+    PerformanceReporter reporter(csvOutput);
 
-        if (licPlate.strChars.length() == 0) {                                                      // if no chars were found in the plate
-            std::cout << std::endl << "no characters were detected" << std::endl << std::endl;      // show message
-            return(0);                                                                              // and exit program
+    int image_number = 0;
+    int skipped_images = 0;
+    double benchmarkTotalTimeMs = 0.0;
+    int benchmarkTotalPlates = 0;
+    int benchmarkTotalChars = 0;
+
+    // Main processing loop over images
+    for (const auto &imagePath : imagePaths) {
+        cv::Mat frame = cv::imread(imagePath);
+        if (frame.empty()) {
+            std::cerr << "Warning: Could not read image: " << imagePath << std::endl;
+            skipped_images++;
+            continue;
+        }
+        image_number++;
+
+        // Image processing statistics
+        FrameStats stats;
+        stats.frame_number = image_number;
+        stats.image_width = frame.cols;
+        stats.image_height = frame.rows;
+
+        // Overall frame timer
+        Timer frame_timer;
+
+        // Detect plates
+        Timer detect_plates_timer;
+        std::vector<PossiblePlate> vectorOfPossiblePlates = detectPlatesInScene(frame);
+        stats.find_plates_time_ms = detect_plates_timer.stop();
+        stats.num_plates_detected = vectorOfPossiblePlates.size();
+
+        // Detect characters in plates
+        Timer detect_chars_timer;
+        vectorOfPossiblePlates = detectCharsInPlates(vectorOfPossiblePlates);
+        stats.detect_chars_time_ms = detect_chars_timer.stop();
+
+        // Count total characters recognized
+        for (const auto &plate : vectorOfPossiblePlates) {
+            stats.num_chars_recognized += plate.strChars.length();
         }
 
-        drawRedRectangleAroundPlate(imgOriginalScene, licPlate);                // draw red rectangle around plate
+        stats.total_time_ms = frame_timer.stop();
 
-        std::cout << std::endl << "license plate read from image = " << licPlate.strChars << std::endl;     // write license plate text to std out
-        std::cout << std::endl << "-----------------------------------------" << std::endl;
+        // Estimate FLOPs
+        FLOPCounter flop_counter;
+        flop_counter.addFindContours(frame.cols, frame.rows);
+        flop_counter.addWarpAffine(frame.cols, frame.rows);
+        for (const auto &plate : vectorOfPossiblePlates) {
+            flop_counter.addGetRectSubPix(plate.imgPlate.cols, plate.imgPlate.rows);
+        }
+        flop_counter.addKNNMatching(stats.num_chars_recognized, 1000, 784);  // Rough estimate: 1000 training samples
 
-        writeLicensePlateCharsOnImage(imgOriginalScene, licPlate);              // write license plate text on the image
+        stats.total_flops = flop_counter.getTotalFLOPs();
+        stats.find_plates_flops = stats.total_flops * 0.6;  // ~60% in plate detection
+        stats.detect_chars_flops = stats.total_flops * 0.4;  // ~40% in char recognition
 
-        cv::imshow("imgOriginalScene", imgOriginalScene);                       // re-show scene image
+        // Calculate performance metrics
+        if (stats.total_time_ms > 0.0) {
+            stats.fps = 1000.0 / stats.total_time_ms;
+            stats.gflops = (stats.total_flops / 1e9) / (stats.total_time_ms / 1000.0);
+        }
 
-        cv::imwrite("imgOriginalScene.png", imgOriginalScene);                  // write image out to file
+        // Record statistics
+        reporter.addFrameStats(stats);
+
+        benchmarkTotalTimeMs += stats.total_time_ms;
+        benchmarkTotalPlates += stats.num_plates_detected;
+        benchmarkTotalChars += stats.num_chars_recognized;
+
+        // Print per-image progress
+        std::cout << "Image " << image_number << " (" << imagePath << "): "
+                      << std::fixed << std::setprecision(2)
+                      << stats.fps << " FPS, "
+                      << stats.gflops << " GFLOPS, "
+                      << stats.num_plates_detected << " plates, "
+                      << stats.num_chars_recognized << " chars" << std::endl;
     }
 
-    cv::waitKey(0);                 // hold windows open until user presses a key
+    cv::destroyAllWindows();
+
+    std::cout << "\nProcessing complete!" << std::endl;
+    std::cout << "Total images processed: " << image_number << std::endl;
+    if (skipped_images > 0) {
+        std::cout << "Skipped unreadable images: " << skipped_images << std::endl;
+    }
+
+    if (image_number == 0) {
+        std::cerr << "Error: No valid images were processed." << std::endl;
+        return(1);
+    }
+
+    // Print and save results
+    reporter.printSummary();
+    reporter.writeCSV();
+
+    const double latencyMsPerImage = benchmarkTotalTimeMs / static_cast<double>(image_number);
+    const double throughputImgPerSec = 1000.0 * static_cast<double>(image_number) / benchmarkTotalTimeMs;
+
+    std::cout << "\n=== CPU Benchmark Summary ===" << std::endl;
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "Latency (ms/img): " << latencyMsPerImage << std::endl;
+    std::cout << "Throughput (img/s): " << throughputImgPerSec << std::endl;
+    std::cout << "Plates detected: " << benchmarkTotalPlates << std::endl;
+    std::cout << "Chars recognized: " << benchmarkTotalChars << std::endl;
+
+    std::ofstream summaryOut(summaryCsvOutput);
+    summaryOut << "platform,num_images,total_time_ms,latency_ms_per_img,throughput_img_per_s,total_plates,total_chars\n";
+    summaryOut << "CPU,"
+               << image_number << ","
+               << std::fixed << std::setprecision(4)
+               << benchmarkTotalTimeMs << ","
+               << latencyMsPerImage << ","
+               << throughputImgPerSec << ","
+               << benchmarkTotalPlates << ","
+               << benchmarkTotalChars << "\n";
+    std::cout << "Summary CSV: " << summaryCsvOutput << std::endl;
 
     return(0);
 }
@@ -82,7 +226,7 @@ void writeLicensePlateCharsOnImage(cv::Mat &imgOriginalScene, PossiblePlate &lic
     cv::Point ptCenterOfTextArea;                   // this will be the center of the area the text will be written to
     cv::Point ptLowerLeftTextOrigin;                // this will be the bottom left of the area that the text will be written to
 
-    int intFontFace = CV_FONT_HERSHEY_SIMPLEX;                              // choose a plain jane font
+    int intFontFace = cv::FONT_HERSHEY_SIMPLEX;                              // choose a plain jane font
     double dblFontScale = (double)licPlate.imgPlate.rows / 30.0;            // base font scale on height of plate area
     int intFontThickness = (int)std::round(dblFontScale * 1.5);             // base font thickness on font scale
     int intBaseline = 0;

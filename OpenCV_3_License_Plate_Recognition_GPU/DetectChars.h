@@ -11,7 +11,7 @@
 #include "Main.h"
 #include "PossibleChar.h"
 #include "PossiblePlate.h"
-#include "Preprocess.h"
+#include "Preprocess.cuh"
 
 // global constants ///////////////////////////////////////////////////////////////////////////////
 // constants for checkIfPossibleChar, this checks one possible char only (does not compare to another char)

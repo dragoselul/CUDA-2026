@@ -12,7 +12,6 @@
 #include "DetectChars.h"
 
 #include<iostream>
-#include<conio.h>           // may have to modify this line if not using Windows
 
 //#define SHOW_STEPS            // un-comment or comment this line to show steps or not
 
@@ -24,7 +23,7 @@ const cv::Scalar SCALAR_GREEN = cv::Scalar(0.0, 255.0, 0.0);
 const cv::Scalar SCALAR_RED = cv::Scalar(0.0, 0.0, 255.0);
 
 // function prototypes ////////////////////////////////////////////////////////////////////////////
-int main(void);
+int main(int argc, char** argv);
 void drawRedRectangleAroundPlate(cv::Mat &imgOriginalScene, PossiblePlate &licPlate);
 void writeLicensePlateCharsOnImage(cv::Mat &imgOriginalScene, PossiblePlate &licPlate);
 
