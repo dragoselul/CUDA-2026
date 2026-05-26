@@ -28,7 +28,14 @@ add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 # 6. Link Libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE ${OpenCV_LIBS})
 
-# 7. Output Build Info (Nice for debugging)
+# 7. Copy KNN training data next to the binary
+file(COPY
+    ${CMAKE_CURRENT_SOURCE_DIR}/classifications.xml
+    ${CMAKE_CURRENT_SOURCE_DIR}/images.xml
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# 8. Output Build Info (Nice for debugging)
 message(STATUS "Build Configuration:")
 message(STATUS "  OpenCV version: ${OpenCV_VERSION}")
 message(STATUS "  Compiler:       ${CMAKE_CXX_COMPILER_ID}")

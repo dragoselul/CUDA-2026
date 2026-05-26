@@ -6,35 +6,35 @@
 cv::Ptr<cv::ml::KNearest> kNearest = cv::ml::KNearest::create();
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-bool loadKNNDataAndTrainKNN(void) {
+bool loadKNNDataAndTrainKNN(const std::string& dataDir) {
 
     // read in training classifications ///////////////////////////////////////////////////
 
-    cv::Mat matClassificationInts;              // we will read the classification numbers into this variable as though it is a vector
+    cv::Mat matClassificationInts;
 
-    cv::FileStorage fsClassifications("classifications.xml", cv::FileStorage::READ);        // open the classifications file
+    cv::FileStorage fsClassifications(dataDir + "/classifications.xml", cv::FileStorage::READ);
 
-    if (fsClassifications.isOpened() == false) {                                                        // if the file was not opened successfully
-        std::cout << "error, unable to open training classifications file, exiting program\n\n";        // show error message
-        return(false);                                                                                  // and exit program
+    if (fsClassifications.isOpened() == false) {
+        std::cout << "error, unable to open training classifications file, exiting program\n\n";
+        return(false);
     }
 
-    fsClassifications["classifications"] >> matClassificationInts;          // read classifications section into Mat classifications variable
-    fsClassifications.release();                                            // close the classifications file
+    fsClassifications["classifications"] >> matClassificationInts;
+    fsClassifications.release();
 
-                                                                            // read in training images ////////////////////////////////////////////////////////////
+    // read in training images ////////////////////////////////////////////////////////////
 
-    cv::Mat matTrainingImagesAsFlattenedFloats;         // we will read multiple images into this single image variable as though it is a vector
+    cv::Mat matTrainingImagesAsFlattenedFloats;
 
-    cv::FileStorage fsTrainingImages("images.xml", cv::FileStorage::READ);              // open the training images file
+    cv::FileStorage fsTrainingImages(dataDir + "/images.xml", cv::FileStorage::READ);
 
-    if (fsTrainingImages.isOpened() == false) {                                                 // if the file was not opened successfully
-        std::cout << "error, unable to open training images file, exiting program\n\n";         // show error message
-        return(false);                                                                          // and exit program
+    if (fsTrainingImages.isOpened() == false) {
+        std::cout << "error, unable to open training images file, exiting program\n\n";
+        return(false);
     }
 
-    fsTrainingImages["images"] >> matTrainingImagesAsFlattenedFloats;           // read images section into Mat training images variable
-    fsTrainingImages.release();                                                 // close the traning images file
+    fsTrainingImages["images"] >> matTrainingImagesAsFlattenedFloats;
+    fsTrainingImages.release();
 
                                                                                 // train //////////////////////////////////////////////////////////////////////////////
 

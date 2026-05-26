@@ -1,0 +1,78 @@
+@startuml
+skinparam defaultFontName Monospaced
+skinparam activityBackgroundColor #DDEEFF
+skinparam activityBorderColor #3355AA
+skinparam arrowColor #3355AA
+skinparam noteBackgroundColor #FFF8CC
+skinparam noteBorderColor #AAAA44
+
+title GPU License Plate Recognition Pipeline
+
+start
+
+:main()\nparse args, find .ppm images;
+
+:loadKNNModel()\nread knn_data.bin from disk;
+note right: H2D(knn weights)
+
+:PipelineContext::create()\nallocate GPU buffer pool + per-plate streams;
+
+:loadPPM()\nread scene image into host RAM;
+
+group SceneAnalyzer::detectPlates()
+
+  :cudaMemcpyAsync;
+  note right: H2D(scene BGR)
+
+  :preprocessDevice()\nBGR → V-channel → erode → open\n→ dilate → close → contrast → blur → threshold;
+
+  :runCCLWithFilter()\nCCL union-find on binary image\n+ GPU blob area/shape filter\n(only char-sized blobs survive);
+  note right: D2H(filtered blobs, async pinned)
+
+  :cudaStreamSynchronize();
+
+  :blobsToChars() + groupChars()\nCPU: blobs → PossibleChar,\ngeometric grouping by height/distance;
+
+  :makePlate()\nCPU: compute plate center, width,\nheight, rotation angle;
+
+  :runBatchWarpCrop()\nGPU: affine rotate + crop each\nplate region from scene BGR;
+
+  :cudaStreamSynchronize();
+
+end group
+
+group PlateRecognizer::recognizePlates() — Wave 1 (parallel per-plate streams)
+
+  :preprocessDevice()\nplate BGR → binary;
+
+  :runResizeInto()\nbilinear resize x1.6;
+
+  :runOtsuThreshold()\nOtsu global threshold;
+
+  :runCCLWithFilter()\nCCL + char blob filter;
+  note right: D2H(char blobs, async pinned)
+
+  :cudaDeviceSynchronize();
+
+end group
+
+:bestCharGroup()\nCPU: pick largest char group per plate,\nsort left-to-right, remove overlaps;
+
+group PlateRecognizer::recognizePlates() — Wave 2 (parallel per-plate streams)
+
+  :runCharROIResize()\ncrop + resize each char ROI\nto KNN_CHAR_W x KNN_CHAR_H float32;
+  note right: H2D(char rects, async)
+
+  :runKNNDevice()\nk-NN classify all chars on GPU;
+  note right: D2H(char labels, async pinned)
+
+  :cudaDeviceSynchronize();
+
+end group
+
+:assembleString()\nCPU: int32 labels → ASCII string;
+
+:std::cout\nprint "image.ppm -> AB1234";
+
+stop
+@enduml

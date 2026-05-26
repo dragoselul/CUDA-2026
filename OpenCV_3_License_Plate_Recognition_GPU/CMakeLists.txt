@@ -1,82 +1,65 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(LicensePlateRecognitionGPU LANGUAGES CXX)
+project(LicensePlateRecognitionGPU LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(LPR_ENABLE_CUDA "Enable CUDA language and compile CUDA sources" ON)
-option(LPR_ENABLE_CUDA_LINEINFO "Enable nvcc -lineinfo for CUDA profiling" ON)
+find_package(CUDAToolkit REQUIRED)
 
-find_package(OpenCV REQUIRED)
-
-set(LPR_CPP_SOURCES
-	Main.cpp
-	DetectChars.cpp
-	DetectPlates.cpp
-	PossibleChar.cpp
-	PossiblePlate.cpp
-	Preprocess.cu
+set(LPR_SOURCES
+    src/host/Main.cpp
+    src/host/ImageIO.cpp
+    src/host/PipelineContext.cpp
+    src/host/SceneAnalyzer.cpp
+    src/host/PlateRecognizer.cpp
+    src/device/Preprocess.cu
+    src/device/CCL.cu
+    src/device/ImageOps.cu
+    src/device/OtsuThreshold.cu
+    src/device/KNN.cu
 )
 
-set(LPR_CUDA_SOURCES)
-
-if(LPR_ENABLE_CUDA)
-	include(CheckLanguage)
-	check_language(CUDA)
-
-	if(CMAKE_CUDA_COMPILER)
-		enable_language(CUDA)
-
-		if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-			message(STATUS "CMAKE_CUDA_ARCHITECTURES not set; using compiler defaults. Set -DCMAKE_CUDA_ARCHITECTURES=<arch> for reproducible builds.")
-		endif()
-
-		file(GLOB LPR_CUDA_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
-	else()
-		message(WARNING "CUDA compiler not found. Building CPU-only sources in GPU project.")
-	endif()
-endif()
-
-add_executable(${PROJECT_NAME}
-		Preprocess.cuh)
-
-target_sources(${PROJECT_NAME}
-	PRIVATE
-	${LPR_CPP_SOURCES}
-	${LPR_CUDA_SOURCES}
-)
+add_executable(${PROJECT_NAME} ${LPR_SOURCES})
 
 target_include_directories(${PROJECT_NAME}
-	PRIVATE
-	${OpenCV_INCLUDE_DIRS}
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/host
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/device
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/common
+    ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-target_link_libraries(${PROJECT_NAME}
-	PRIVATE
-	${OpenCV_LIBS}
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
 )
 
-if(CMAKE_CUDA_COMPILER AND LPR_CUDA_SOURCES)
-	set_source_files_properties(${LPR_CUDA_SOURCES} PROPERTIES LANGUAGE CUDA)
-	set_target_properties(${PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    message(STATUS "CMAKE_CUDA_ARCHITECTURES not set; using native detection.")
+    set(CMAKE_CUDA_ARCHITECTURES native)
+endif()
 
-	if(LPR_ENABLE_CUDA_LINEINFO)
-		target_compile_options(${PROJECT_NAME} PRIVATE
-			$<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
-		)
-	endif()
+if(LPR_ENABLE_CUDA_LINEINFO OR NOT DEFINED LPR_ENABLE_CUDA_LINEINFO)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    )
 endif()
 
 message(STATUS "Build Configuration:")
-message(STATUS "  OpenCV version:        ${OpenCV_VERSION}")
-message(STATUS "  C++ compiler:          ${CMAKE_CXX_COMPILER_ID}")
-message(STATUS "  CUDA requested:        ${LPR_ENABLE_CUDA}")
-message(STATUS "  CUDA compiler found:   ${CMAKE_CUDA_COMPILER}")
-message(STATUS "  CUDA architectures:    ${CMAKE_CUDA_ARCHITECTURES}")
-message(STATUS "  CUDA lineinfo:         ${LPR_ENABLE_CUDA_LINEINFO}")
-list(LENGTH LPR_CPP_SOURCES LPR_CPP_COUNT)
-list(LENGTH LPR_CUDA_SOURCES LPR_CUDA_COUNT)
-message(STATUS "  C++ sources:           ${LPR_CPP_COUNT}")
-message(STATUS "  CUDA sources:          ${LPR_CUDA_COUNT}")
+message(STATUS "  C++ compiler:       ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "  CUDA compiler:      ${CMAKE_CUDA_COMPILER}")
+message(STATUS "  CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
+# ─── Copy KNN binary data next to the binary ──────────────────────────────────
+file(COPY
+    ${CMAKE_CURRENT_SOURCE_DIR}/knn_data.bin
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# ─── clean-outputs: remove program-generated files (not profiling reports) ────
+# Usage: cmake --build build --target clean-outputs
+add_custom_target(clean-outputs
+    COMMAND find "${CMAKE_SOURCE_DIR}" -maxdepth 1 -name "*.csv" -delete -print
+    COMMENT "Removing generated CSV output files"
+    VERBATIM
+)

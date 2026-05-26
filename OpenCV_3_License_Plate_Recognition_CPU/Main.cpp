@@ -54,12 +54,12 @@ static std::vector<std::string> collectImagePaths(const std::string &inputPath) 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char** argv) {
 
-    bool blnKNNTrainingSuccessful = loadKNNDataAndTrainKNN();           // attempt KNN training
+    std::string dataDir = fs::canonical("/proc/self/exe").parent_path().string();
+    bool blnKNNTrainingSuccessful = loadKNNDataAndTrainKNN(dataDir);
 
-    if (blnKNNTrainingSuccessful == false) {                            // if KNN training was not successful
-                                                                        // show error message
+    if (blnKNNTrainingSuccessful == false) {
         std::cout << std::endl << std::endl << "error: KNN training was not successful" << std::endl << std::endl;
-        return(0);                                                      // and exit program
+        return(0);
     }
 
     std::vector<std::string> imagePaths;

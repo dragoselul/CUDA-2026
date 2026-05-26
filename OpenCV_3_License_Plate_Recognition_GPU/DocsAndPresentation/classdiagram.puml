@@ -1,0 +1,120 @@
+@startuml class_diagram
+!theme plain
+skinparam defaultFontName Monospaced
+skinparam ClassFontSize 11
+skinparam ClassAttributeFontSize 10
+skinparam ClassBorderColor #5D6D7E
+skinparam ClassBackgroundColor #EBF5FB
+skinparam PackageBorderColor #AAA
+skinparam TitleFontSize 13
+skinparam TitleFontStyle bold
+
+title GPU License Plate Recognition — Module Architecture
+
+package "Application (CPU)" {
+  class Main {
+    +main(argc, argv) : int
+    -collectImagePaths(path) : vector<string>
+    -writeSummaryCsv(path, summary)
+  }
+
+  class PipelineContext {
+    +KNNModel       knnModel
+    +BufferPool     pool
+    +cudaStream_t   sceneStream
+    +cudaStream_t   plateStreams[]
+    +uint8_t*       h_compStats  [pinned]
+    +int            maxPlates
+    --
+    +create(maxPlates) : PipelineContext
+    +destroy()
+  }
+
+  class SceneAnalyzer {
+    +detectPlates(img: HostImage,\n  ctx: PipelineContext) : vector<PossiblePlate>
+    -groupCharsGeometric(chars) : vector<vector<PossibleChar>>
+    -estimatePlatePose(group) : RotatedRect
+  }
+
+  class PlateRecognizer {
+    +recognizePlates(plates: vector<PossiblePlate>,\n  ctx: PipelineContext)
+    -onPlateReady(i, ctx)  [cudaLaunchHostFunc]
+    -assembleString(labels, n) : string
+  }
+
+  class ImageIO {
+    +loadPPM(path) : HostImage
+  }
+}
+
+package "Data Types" {
+  class HostImage {
+    +uint8_t* data
+    +int      width, height, stride
+  }
+  class PossibleChar {
+    +Rect2i  boundingRect
+    +int     centerX, centerY
+    +double  diagonalSize, aspectRatio
+  }
+  class PossiblePlate {
+    +RotatedRect location
+    +string      strChars
+  }
+}
+
+package "GPU Modules (.cu / .cuh)" {
+  class Preprocess {
+    +preprocessDevice(img, stream)\n  : DeviceImage
+  }
+  class CCL {
+    +runCCL(img, stream) : DeviceImage
+    +filterBlobsKernel(stats, n,\n  out, count)  ★ new
+  }
+  class WarpCrop {
+    +batchWarpCrop(scene, rois[],\n  out[], P, stream)  ★ batch
+  }
+  class Resize {
+    +runResize(src, scale, stream)
+    +runCharROIResize(src, rois,\n  d_queries, n, stream)
+  }
+  class OtsuThreshold {
+    +runOtsuThreshold(img, stream)\n  : DeviceImage
+  }
+  class KNN {
+    +loadKNNModel(path) : KNNModel
+    +freeKNNModel(model)
+    +runKNNDevice(queries, model,\n  n, stream) : h_labels
+  }
+  class BufferPool {
+    +d_plate_bgr[]
+    +d_thresh[]
+    +d_thresh_otsu[]
+    --
+    +allocate(P, w, h)
+    +free()
+  }
+}
+
+Main            --> PipelineContext
+Main            --> SceneAnalyzer
+Main            --> PlateRecognizer
+Main            --> ImageIO
+
+PipelineContext *-- BufferPool
+PipelineContext --> KNN
+
+SceneAnalyzer   --> Preprocess
+SceneAnalyzer   --> CCL
+SceneAnalyzer   --> WarpCrop
+SceneAnalyzer  ..> PossiblePlate
+SceneAnalyzer  ..> PossibleChar
+
+PlateRecognizer --> Preprocess
+PlateRecognizer --> CCL
+PlateRecognizer --> Resize
+PlateRecognizer --> OtsuThreshold
+PlateRecognizer --> KNN
+PlateRecognizer ..> PossiblePlate
+
+@enduml

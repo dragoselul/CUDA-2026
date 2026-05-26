@@ -48,7 +48,7 @@ extern cv::Ptr<cv::ml::KNearest>  kNearest;
 
 // function prototypes ////////////////////////////////////////////////////////////////////////////
 
-bool loadKNNDataAndTrainKNN(void);
+bool loadKNNDataAndTrainKNN(const std::string& dataDir);
 
 std::vector<PossiblePlate> detectCharsInPlates(std::vector<PossiblePlate> &vectorOfPossiblePlates);
 

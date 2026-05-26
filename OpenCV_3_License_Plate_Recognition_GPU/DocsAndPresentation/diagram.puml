@@ -1,0 +1,69 @@
+@startuml pipeline_overview
+!theme plain
+skinparam defaultFontName Monospaced
+skinparam ActivityFontSize 11
+skinparam ArrowFontSize 10
+skinparam TitleFontSize 13
+skinparam TitleFontStyle bold
+
+title GPU License Plate Recognition — Pipeline Overview
+
+|#D6EAF8|CPU|
+|#FDEBD0|GPU · Scene Stream|
+|#D5F5E3|GPU · Plate Streams [0..P−1]|
+
+|CPU|
+start
+
+partition "INIT  (once, --max-plates P)" {
+  :Load knn_data.bin\n→ d_training, d_trainLabels  (persistent GPU memory);
+  :Allocate BufferPool  P × { d_plate_bgr, d_thresh, d_thresh_otsu }\ncreate sceneStream + plateStreams[P] + pinned h_char_stats[];
+}
+
+repeat
+
+  |CPU|
+  :Load PPM → HostImage;
+
+  partition "STAGE 1 · Scene → Plate ROIs" {
+    |GPU · Scene Stream|
+    :H2D  d_scene_bgr;
+    :preprocess()\nBGR→V → Erode/Dilate → TopHat → Blur → AdaptThresh;
+    :ccl()  →  filterBlobsKernel()  ← GPU ★\n→ h_possible_chars[]  async D2H pinned;
+    note right: filter on GPU, only survivors cross PCIe\n(area, size, aspect ratio checks)
+
+    |CPU|
+    :groupCharsGeometric() → plate_rois[P];
+
+    |GPU · Scene Stream|
+    :batchWarpCrop( plate_rois )\n→ pool.d_plate_bgr[0..P−1];
+  }
+
+  partition "STAGE 2 · Per-Plate Pipeline  ← P streams, pipelined →" {
+    |GPU · Plate Streams [0..P−1]|
+    :preprocess( pool.d_plate_bgr[i] )\n→ pool.d_thresh[i];
+    :resize ×1.6  +  otsuThreshold()\n→ pool.d_thresh_otsu[i];
+    :ccl()  →  filterBlobsKernel()  ← GPU ★\n→ h_char_stats[i][]  async D2H pinned;
+
+    |CPU|
+    :cudaLaunchHostFunc  ← runs on stream completion ★\ngroupCharsGeometric() → char_rois[i];
+    note right: host func queued in stream;\nplate streams overlap each other here
+
+    |GPU · Plate Streams [0..P−1]|
+    :charROIResize( char_rois[i] )\n→ d_queries[i][ Ni×600 ];
+    :knn( d_queries[i] )\n1 block/char · L2 + tree-reduce\n→ h_labels[i]  sync D2H;
+
+    |CPU|
+    :mapLabels() → plate.strChars[i];
+  }
+
+  |CPU|
+  :cudaDeviceSynchronize()  ← await all plate streams;
+  :print plate strings;
+
+repeat while (more images?)
+
+|CPU|
+:writeCSV( benchmark );
+stop
+@enduml

@@ -1,0 +1,129 @@
+@startuml GPU License Plate Recognition — Activity Diagram
+title GPU License Plate Recognition Pipeline
+
+skinparam activityBackgroundColor #f9f9f9
+skinparam activityBorderColor #444
+skinparam swimlaneBorderColor #666
+skinparam swimlaneBorderThickness 2
+skinparam arrowColor #333
+skinparam noteBackgroundColor #fffde7
+skinparam noteBorderColor #f0ad4e
+
+|Host (CPU)|
+start
+
+:Parse CLI args\n(image path, --max-plates N, csv path);
+
+:loadKNNModel("knn_data.bin")\nread header → numSamples=180, features=600\nread labels[] + feature matrix;
+
+|Host (CPU)|
+note right
+  **H → D  (one-time)**
+  180 × 600 float32 training data
+  180 × int32 labels
+  → GPU VRAM (persistent for all images)
+end note
+
+|Host (CPU)|
+:Collect all .ppm image paths\nfrom directory (sorted);
+
+:PipelineContext::create(maxPlates)\n──────────────────────────────\ncudaStreamCreate  →  sceneStream\ncudaStreamCreate  →  plateStreams[0..N]\ncudaMalloc + cudaMallocHost\n  per PlateBuffer slot:\n  d_plate_bgr, d_thresh, d_thresh_big\n  d_thresh_otsu, d_filtered, d_queries\n  d_knn_results, h_filtered, h_labels\nSceneBuffer: d_filtered, h_filtered (pinned);
+
+repeat
+
+  |Host (CPU)|
+  :loadPPM(imgPath)\n→ HostImage { data*, width, height }\n  (raw RGB bytes in CPU RAM);
+
+  |GPU — sceneStream|
+  :sceneBuffer.ensureSize(W, H)\nlazy realloc — no-op if same size as last frame\n(d_scene_bgr, d_scene_thresh, scenePreproc\nstay allocated across images in PipelineContext);
+
+  :cudaMemcpyAsync  **H→D**\nHostImage.data → d_scene_bgr\n(W×H×3 bytes, async on sceneStream);
+
+  :preprocessDevice  — 6 kernels, pipelined\n─────────────────────────────────────────\n① extractValueChannel  BGR → V (max channel)\n② erode                V → d_eroded\n③ dilate               d_eroded → d_opened  (opening)\n④ dilate               V → d_dilated\n⑤ erode                d_dilated → d_closed  (closing)\n⑥ adaptiveThreshold    contrast+blur → d_scene_thresh  (binary);
+
+  :runCCLWithFilter\n─────────────────────────────\ninitLabels  (1 thread/pixel)\niterativeUnionFind  (≤256 iterations)\ncomputeStats  (bounding box, area)\nfilterBlobsKernel  (aspect ratio, area)\n→ d_filtered[], d_num_filtered;
+
+  :cudaMemcpyAsync  **D→H**\nd_filtered → h_filtered  (pinned)\nd_num_filtered → h_num_filtered  (pinned)\n(async on sceneStream);
+
+  |Host (CPU)|
+  :cudaStreamSynchronize(sceneStream)\n← wait for CCL D→H to land;
+
+  :cudaFree d_scene_thresh\nfreePreprocessBuffers;
+
+  :blobsToChars(h_filtered, numFiltered)\n→ PossibleChar[] with bounding rects;
+
+  :groupChars(chars)\ngeometric checks:\n  distance, angle, size similarity\n→ vector<vector<PossibleChar>>\n  (each inner vec = one plate candidate);
+
+  if (no groups found?) then (yes)
+    :skip image;
+    goto nextImage
+  else (no)
+  endif
+
+  :makePlate() per group\ncompute rotated rect center + angle\ncheck dimensions ≤ MAX_PLATE_W×H\n→ WarpParams[], PossiblePlate[];
+
+  |GPU — sceneStream|
+  :runBatchWarpCrop\n────────────────────────────\nall plates in a single kernel launch\nd_scene_bgr + WarpParams[]\n→ d_plate_bgr[slot]  (per pool slot);
+
+  |Host (CPU)|
+  :cudaStreamSynchronize(sceneStream)\n← wait for all crops to finish;
+
+  :cudaFree d_scene_bgr;
+
+  note right
+    **WAVE 1 — all plateStreams run in parallel**
+    One CUDA stream per plate slot (0..N-1)
+  end note
+
+  fork
+    |GPU — plateStreams [×N parallel]|
+    :preprocessDevice  (same 6-kernel chain)\nd_plate_bgr[slot] → d_thresh[slot]  (binary);
+
+    :runResizeInto  ×1.6\nd_thresh → d_thresh_big  (bilinear, 1 kernel);
+
+    :runOtsuThreshold\nhistogram reduction → global threshold T\nbinarise d_thresh_big → d_thresh_otsu;
+
+    :runCCLWithFilter\nd_thresh_otsu → d_filtered[slot]\n(same CCL pipeline as scene stage);
+
+    :cudaMemcpyAsync  **D→H**\nd_filtered[slot] → h_filtered[slot]  (pinned);
+  end fork
+
+  |Host (CPU)|
+  :cudaDeviceSynchronize()\n← all plate Wave-1 streams done;
+
+  :bestCharGroup() per plate\nblobsToChars → groupChars → pick largest group\nremoveInnerOverlapping\n→ char bounding rects[];
+
+  note right
+    **WAVE 2 — all plateStreams run in parallel**
+  end note
+
+  fork
+    |GPU — plateStreams [×N parallel]|
+    :runCharROIResize\nfor each char rect:\n  crop ROI from d_thresh_otsu\n  resize to 20×30 pixels\n  normalise → float32\n→ d_queries[slot]  (N_chars × 600 floats);
+
+    :runKNNDevice  (brute-force k=1)\n1 CUDA block per query char\nthreads compute L2 vs all 180 samples\nshared-mem tree reduction → nearest label\n→ d_knn_results[slot];
+
+    :cudaMemcpyAsync  **D→H**\nd_knn_results[slot] → h_labels[slot]  (pinned);
+  end fork
+
+  |Host (CPU)|
+  :cudaDeviceSynchronize()\n← all plate Wave-2 streams done;
+
+  :assembleString(h_labels, N_chars)\ncast ASCII int32 → char → std::string\n→ plate.strChars;
+
+  :print recognised plates\n(path → "SB90TZ", etc.);
+
+  label nextImage
+  repeat while (more images?) is (yes)
+->no;
+
+|Host (CPU)|
+:reporter.writeCsv()\nlatency, throughput, plates, chars;
+
+:ctx.destroy()\nfree all GPU/pinned buffers\ndestroy all streams;
+
+:freeKNNModel()\ncudaFree d_training, d_trainLabels;
+
+stop
+
+@enduml
