@@ -22,11 +22,12 @@ std::vector<PossiblePlate> SceneAnalyzer::detectPlates(SceneBuffer&     sb,
     preprocessDevice(sb.d_scene_bgr, sb.d_scene_thresh, W, H, sb.scenePreproc, stream);
 
     // ── CCL + GPU filter → async D2H to pinned scene buffers ─────────────────
-    cudaMemsetAsync(sb.d_num_filtered, 0, sizeof(int), stream);
     runCCLWithFilter(sb.d_scene_thresh, W, H,
+                     sb.sceneWS,
                      sb.d_filtered, sb.d_num_filtered,
                      sb.h_filtered, sb.h_num_filtered,
-                     stream);
+                     stream,
+                     /*maxIter=*/256, /*allowCoop=*/true);
 
     // Sync scene stream: we need h_filtered before CPU grouping.
     cudaStreamSynchronize(stream);
@@ -39,14 +40,14 @@ std::vector<PossiblePlate> SceneAnalyzer::detectPlates(SceneBuffer&     sb,
     // ── Batch WarpCrop: all plate groups → pool slots ─────────────────────────
     std::vector<PossiblePlate> plates;
     int slot = 0;
-    std::vector<WarpParams>          warpParams;
-    std::vector<unsigned char*>      dsts;
+    std::vector<WarpParams>     warpParams;
+    std::vector<unsigned char*> dsts;
 
     for (auto& group : groups) {
         if (slot >= ctx.maxPlates) break;
 
         PossiblePlate plate = makePlate(group, slot, W, H);
-        if (plate.poolSlot < 0) continue;   // rejected (dimensions out of bounds)
+        if (plate.poolSlot < 0) continue;
 
         warpParams.push_back({
             plate.rrLocationOfPlateInScene.center.x,
@@ -92,9 +93,8 @@ PossiblePlate SceneAnalyzer::makePlate(const std::vector<PossibleChar>& group,
     for (const auto& c : sorted) totalH += c.boundingRect.height;
     int plateH = (int)((totalH / sorted.size()) * PLATE_HEIGHT_PADDING_FACTOR);
 
-    // Reject if dimensions exceed pool allocation.
     if (plateW <= 0 || plateH <= 0 || plateW > MAX_PLATE_W || plateH > MAX_PLATE_H)
-        return plate;   // poolSlot stays -1
+        return plate;
 
     double opp      = last.intCenterY - first.intCenterY;
     double hyp      = distanceBetweenChars(first, last);

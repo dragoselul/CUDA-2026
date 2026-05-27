@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cctype>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -74,7 +75,7 @@ static void writeCsv(const std::string& path, const BenchmarkSummary& s,
 
 // =============================================================================
 // Loader thread: reads .ppm files from disk into a bounded queue so the main
-// thread can upload to the GPU without waiting on disk I/O.
+// thread can copy into managed memory without waiting on disk I/O.
 // =============================================================================
 struct LoaderQueue {
     std::deque<HostImage>   items;
@@ -104,7 +105,6 @@ static void runLoader(const std::vector<std::string>& paths, LoaderQueue& q)
 // =============================================================================
 int main(int argc, char** argv)
 {
-    // ── Parse arguments: [image_path] [--max-plates N] [csv_output] ──────────
     std::string imagePath, csvPath = "license_plate_gpu_benchmark.csv";
     int maxPlates = 8;
 
@@ -119,14 +119,12 @@ int main(int argc, char** argv)
         }
     }
 
-    // ── Load KNN model (GPU, persistent) ──────────────────────────────────────
     std::string knnPath = (fs::canonical("/proc/self/exe").parent_path() / "knn_data.bin").string();
     if (!loadKNNModel(knnPath.c_str(), gKnnModel)) {
         std::cerr << "Error: knn_data.bin not found next to binary (" << knnPath << ")\n";
         return 1;
     }
 
-    // ── Collect images ─────────────────────────────────────────────────────────
     auto paths = imagePath.empty() ? collectImagePaths(".") : collectImagePaths(imagePath);
     if (paths.empty() && imagePath.empty()) paths = collectImagePaths("..");
     if (paths.empty()) {
@@ -135,7 +133,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // ── Build pipeline context once (allocates pool + streams) ────────────────
     PipelineContext ctx = PipelineContext::create(maxPlates);
     SceneAnalyzer   sceneAnalyzer;
     PlateRecognizer plateRecognizer;
@@ -143,16 +140,13 @@ int main(int argc, char** argv)
     BenchmarkSummary summary;
     int skipped = 0;
 
-    // Two host-side image slots — ping-pong so one can be uploading
-    // while the other is being processed on the GPU.
-    HostImage h_bufs[2];
+    // Staging buffers: loader writes here, main thread uploads to device via DMA.
+    // NUM_SCENE_SLOTS slots so we can overlap one upload with GPU compute.
+    HostImage h_bufs[NUM_SCENE_SLOTS];
 
-    // Start loader thread — reads images from disk into a bounded queue.
     LoaderQueue queue;
     std::thread loader(runLoader, std::cref(paths), std::ref(queue));
 
-    // Pop the next HostImage from the queue (blocks if empty, returns
-    // a null HostImage when the queue is drained and the loader is done).
     auto popImage = [&]() -> HostImage {
         std::unique_lock<std::mutex> lk(queue.mtx);
         queue.ready.wait(lk, [&]{ return !queue.items.empty() || queue.done; });
@@ -163,28 +157,28 @@ int main(int argc, char** argv)
         return img;
     };
 
-    // Upload h_bufs[slot] to the GPU and record the completion event.
-    // Always records the event so the compute stream never stalls on
-    // a stale signal, even when the image failed to load.
+    // Async H2D DMA on transferStream; record event so sceneStream waits.
     auto uploadToGPU = [&](int slot) {
+        SceneBuffer& sb = ctx.sceneBuffers[slot];
         if (h_bufs[slot].data)
-            cudaMemcpyAsync(ctx.sceneBuffers[slot].d_scene_bgr,
-                            h_bufs[slot].data,
+            cudaMemcpyAsync(sb.d_scene_bgr, h_bufs[slot].data,
                             (size_t)SCENE_W * SCENE_H * 3,
                             cudaMemcpyHostToDevice, ctx.transferStream);
         cudaEventRecord(ctx.uploadDone[slot], ctx.transferStream);
     };
 
-    // Pre-fill slot 0 before entering the loop.
+    // Pre-fill slot 0.
     h_bufs[0] = popImage();
     uploadToGPU(0);
 
     auto totalStart = std::chrono::steady_clock::now();
 
     for (int i = 0; i < (int)paths.size(); i++) {
-        const int cur = i % 2;
-        const int nxt = (i + 1) % 2;
+        const int cur = i % NUM_SCENE_SLOTS;
+        const int nxt = (i + 1) % NUM_SCENE_SLOTS;
 
+        // Wait for the prefetch of the current slot to complete before the
+        // compute stream reads from m_scene_bgr.
         cudaStreamWaitEvent(ctx.sceneStream, ctx.uploadDone[cur], 0);
 
         if (!h_bufs[cur].data) {
@@ -198,6 +192,7 @@ int main(int argc, char** argv)
 
         auto plates = sceneAnalyzer.detectPlates(ctx.sceneBuffers[cur], ctx);
 
+        // Overlap: start prefetching next frame while GPU processes current one.
         if (i + 1 < (int)paths.size()) {
             h_bufs[nxt] = popImage();
             uploadToGPU(nxt);

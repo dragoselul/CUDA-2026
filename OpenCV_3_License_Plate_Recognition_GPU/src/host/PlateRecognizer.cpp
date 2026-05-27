@@ -1,7 +1,7 @@
 // PlateRecognizer.cpp
 // Stage 2: plate BGR crops → recognised strings.
 // Two GPU waves across P plate streams:
-//   Wave 1 (parallel): preprocess → resize → Otsu → CCL+filter → async D2H
+//   Wave 1 (parallel): preprocess → resize → Otsu → CCL+filter → managed m_filtered
 //   Wave 2 (parallel): charROIResize → KNN → async D2H
 // Between waves, CPU groups char blobs (fast, O(N) per plate).
 
@@ -35,18 +35,13 @@ void PlateRecognizer::recognizePlates(std::vector<PossiblePlate>& plates,
         const int     dstW   = (int)(W * 1.6f);
         const int     dstH   = (int)(H * 1.6f);
 
-        // Preprocess BGR → binary (async, uses pool d_thresh)
         preprocessDevice(pb.d_plate_bgr, pb.d_thresh, W, H, pb.preproc, stream);
-
-        // Resize ×1.6 into pool buffer
         runResizeInto(pb.d_thresh, W, H, pb.d_thresh_big, dstW, dstH, stream);
-
-        // OtsuThreshold: d_thresh_big → d_thresh_otsu
         runOtsuThreshold(pb.d_thresh_big, pb.d_thresh_otsu, dstW, dstH, stream);
 
-        // CCL + filter → pinned h_filtered (async D2H)
-        cudaMemsetAsync(pb.d_num_filtered, 0, sizeof(int), stream);
+        // CCL + filter → async D2H to pinned pb.h_filtered
         runCCLWithFilter(pb.d_thresh_otsu, dstW, dstH,
+                         pb.plateWS,
                          pb.d_filtered, pb.d_num_filtered,
                          pb.h_filtered, pb.h_num_filtered,
                          stream);
@@ -57,8 +52,8 @@ void PlateRecognizer::recognizePlates(std::vector<PossiblePlate>& plates,
 
     // ── CPU: group chars per plate ─────────────────────────────────────────────
     struct PlateWork {
-        int                      slot;
-        int                      dstW, dstH;
+        int                       slot;
+        int                       dstW, dstH;
         std::vector<PossibleChar> chars;
         std::vector<Rect2i>       rects;
     };
@@ -98,7 +93,6 @@ void PlateRecognizer::recognizePlates(std::vector<PossiblePlate>& plates,
                      pb.d_knn_results, pb.h_labels, stream);
     }
 
-    // Wait for all KNN results.
     cudaDeviceSynchronize();
 
     // ── CPU: assemble plate strings ────────────────────────────────────────────
