@@ -1,0 +1,2 @@
+platform,max_plates,num_images,total_time_ms,latency_ms_per_img,throughput_img_per_s,total_plates,total_chars
+GPU-no-opencv,2,550,554.7944,1.0087,991.3582,658,1812

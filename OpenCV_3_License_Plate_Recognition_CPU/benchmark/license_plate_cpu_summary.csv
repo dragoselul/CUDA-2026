@@ -1,0 +1,2 @@
+platform,num_images,total_time_ms,latency_ms_per_img,throughput_img_per_s,total_plates,total_chars
+CPU,550,5289.3834,9.6171,103.9819,988,3049

@@ -8,6 +8,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -95,6 +96,7 @@ int main(int argc, char** argv) {
     double benchmarkTotalTimeMs = 0.0;
     int benchmarkTotalPlates = 0;
     int benchmarkTotalChars = 0;
+    int benchmarkMaxPlates = 0;
 
     // Main processing loop over images
     for (const auto &imagePath : imagePaths) {
@@ -158,6 +160,8 @@ int main(int argc, char** argv) {
         benchmarkTotalTimeMs += stats.total_time_ms;
         benchmarkTotalPlates += stats.num_plates_detected;
         benchmarkTotalChars += stats.num_chars_recognized;
+        if (stats.num_plates_detected > benchmarkMaxPlates)
+            benchmarkMaxPlates = stats.num_plates_detected;
 
         // Print per-image progress
         std::cout << "Image " << image_number << " (" << imagePath << "): "
@@ -166,6 +170,16 @@ int main(int argc, char** argv) {
                       << stats.gflops << " GFLOPS, "
                       << stats.num_plates_detected << " plates, "
                       << stats.num_chars_recognized << " chars" << std::endl;
+
+        // Per-frame recognised plate string(s) — for CPU/GPU correctness comparison.
+        std::string plateOut;
+        for (const auto &plate : vectorOfPossiblePlates) {
+            if (plate.strChars.empty()) continue;
+            if (!plateOut.empty()) plateOut += " ";
+            plateOut += plate.strChars;
+        }
+        std::cout << "PLATEOUT " << fs::path(imagePath).filename().string()
+                  << " -> " << plateOut << std::endl;
     }
 
     cv::destroyAllWindows();
@@ -188,23 +202,22 @@ int main(int argc, char** argv) {
     const double latencyMsPerImage = benchmarkTotalTimeMs / static_cast<double>(image_number);
     const double throughputImgPerSec = 1000.0 * static_cast<double>(image_number) / benchmarkTotalTimeMs;
 
-    std::cout << "\n=== CPU Benchmark Summary ===" << std::endl;
-    std::cout << std::fixed << std::setprecision(3);
-    std::cout << "Latency (ms/img): " << latencyMsPerImage << std::endl;
-    std::cout << "Throughput (img/s): " << throughputImgPerSec << std::endl;
-    std::cout << "Plates detected: " << benchmarkTotalPlates << std::endl;
-    std::cout << "Chars recognized: " << benchmarkTotalChars << std::endl;
+    const std::string header = "platform,max_plates,num_images,total_time_ms,latency_ms_per_img,throughput_img_per_s,total_plates,total_chars";
+    std::ostringstream row;
+    row << std::fixed << std::setprecision(4)
+        << "CPU-opencv,"
+        << benchmarkMaxPlates << ","
+        << image_number << ","
+        << benchmarkTotalTimeMs << ","
+        << latencyMsPerImage << ","
+        << throughputImgPerSec << ","
+        << benchmarkTotalPlates << ","
+        << benchmarkTotalChars;
+
+    std::cout << "\n" << header << "\n" << row.str() << "\n";
 
     std::ofstream summaryOut(summaryCsvOutput);
-    summaryOut << "platform,num_images,total_time_ms,latency_ms_per_img,throughput_img_per_s,total_plates,total_chars\n";
-    summaryOut << "CPU,"
-               << image_number << ","
-               << std::fixed << std::setprecision(4)
-               << benchmarkTotalTimeMs << ","
-               << latencyMsPerImage << ","
-               << throughputImgPerSec << ","
-               << benchmarkTotalPlates << ","
-               << benchmarkTotalChars << "\n";
+    summaryOut << header << "\n" << row.str() << "\n";
     std::cout << "Summary CSV: " << summaryCsvOutput << std::endl;
 
     return(0);

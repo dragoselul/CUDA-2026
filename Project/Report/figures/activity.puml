@@ -1,0 +1,98 @@
+@startuml activity
+title GPU License Plate Recognition — Pipeline Activity
+
+skinparam defaultFontName Helvetica
+skinparam activityFontSize 9
+skinparam activityBackgroundColor #EEF3FA
+skinparam activityBorderColor #4A6FA5
+skinparam activityBorderThickness 1.2
+skinparam activityDiamondBackgroundColor #FFF9E6
+skinparam activityDiamondBorderColor #C8A000
+skinparam swimlaneBorderColor #4A6FA5
+skinparam swimlaneBorderThickness 1.5
+skinparam swimlaneBackgroundColor #FAFAFA
+skinparam arrowColor #333
+skinparam arrowThickness 1.2
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #F0AD4E
+
+' ── one-time setup ──────────────────────────────────────────────────────
+|Host|
+start
+:Parse CLI args;
+:Load KNN model to GPU (persistent);
+:Collect + sort .ppm paths;
+:PipelineContext::create()\n(4x SceneBuffer, Nx PlateBuffer, CCL workspaces,\nstreams, events — all allocated once);
+:Start loader thread;
+:Upload slot 0 (transferStream);
+
+' ── per-image loop ──────────────────────────────────────────────────────
+repeat
+
+  |Host|
+  :cur = i % 4;
+
+  ' ── SCENE STAGE: one vertical run ─────────────────────────────────────
+  |GPU sceneStream|
+  :wait uploadDone[cur];
+  :Preprocess  (value -> open/close\n-> adaptive threshold);
+  :CCL  (coop propagate ★ -> filter blobs)\nasync D->H to pinned host;
+
+  |Host|
+  :sync sceneStream;
+  :Group blobs into plate candidates;
+
+  if (any plate?) then (no)
+    :skip image;
+    goto nextImg
+  endif
+
+  |GPU sceneStream|
+  :runBatchWarpCrop  (all plates, one launch);
+
+  |Host|
+  :sync sceneStream;
+  note right
+    **Overlap:** prefetch next frame
+    (upload slot nxt on transferStream)
+    while plates are processed
+  end note
+
+  ' ── PLATE STAGE — Wave 1: localise chars ──────────────────────────────
+  |GPU plateStreams|
+  note right: **Wave 1** — N plate streams in parallel (localise chars)
+  fork
+    :Preprocess plate;
+    :Resize x1.6;
+    :Otsu threshold;
+    :CCL  (filter char blobs)\nasync D->H to pinned host;
+  end fork
+
+  |Host|
+  :cudaDeviceSynchronize();
+  :bestCharGroup per plate;
+
+  ' ── PLATE STAGE — Wave 2: recognise chars ─────────────────────────────
+  |GPU plateStreams|
+  note right: **Wave 2** — N plate streams in parallel (recognise chars)
+  fork
+    :runCharROIResize  (-> 20x30 float32 descriptors);
+    :runKNNDevice  (k=1 brute-force)\nasync D->H labels;
+  end fork
+
+  |Host|
+  :cudaDeviceSynchronize();
+  :assembleString per plate;
+  :Print recognised plates;
+
+  label nextImg
+  repeat while (more images?) is (yes)
+->no;
+
+|Host|
+:loader.join();
+:writeCsv();
+:ctx.destroy();
+stop
+
+@enduml
