@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.18)
 project(LicensePlateRecognition)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # 1. Standard C++ Setup
 set(CMAKE_CXX_STANDARD 17) # Upped to 17 for better modern library support
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
