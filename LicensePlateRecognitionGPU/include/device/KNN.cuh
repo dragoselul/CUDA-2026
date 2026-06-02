@@ -1,6 +1,3 @@
-// KNN.cuh
-// GPU brute-force k=1 nearest neighbor for character recognition.
-
 #pragma once
 #include <cstdint>
 #include <cuda_runtime.h>
@@ -15,16 +12,8 @@ struct KNNModel {
     int      numSamples    = 0;
 };
 
-// Load binary knn_data.bin; allocates GPU memory. Returns false on failure.
 bool loadKNNModel(const char* binPath, KNNModel& model);
 void freeKNNModel(KNNModel& model);
-
-// Classify numChars query images (d_queries already on device) using k=1 NN.
-// d_results   : pre-allocated device buffer [numChars × int32_t]
-// h_labels    : pre-allocated pinned host output [numChars] — filled via async D2H
-//
-// All work is enqueued on `stream`; no internal synchronisation.
-// Caller must cudaStreamSynchronize(stream) before reading h_labels.
 void runKNNDevice(const KNNModel& model,
                   const float*    d_queries,
                   int             numChars,

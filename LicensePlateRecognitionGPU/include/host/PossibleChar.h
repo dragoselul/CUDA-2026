@@ -1,6 +1,3 @@
-// PossibleChar.h
-// No external dependencies. Contour replaced by bounding rect + component ID.
-
 #ifndef POSSIBLE_CHAR_H
 #define POSSIBLE_CHAR_H
 
@@ -14,7 +11,7 @@ public:
     int     intCenterY;
     double  dblDiagonalSize;
     double  dblAspectRatio;
-    int     componentId;   // unique CCL component ID; used for equality
+    int     componentId;
 
     PossibleChar() = default;
 

@@ -1,6 +1,3 @@
-// Main.cpp
-// Thin controller: load KNN model, build PipelineContext, process images.
-
 #include "SceneAnalyzer.h"
 #include "PlateRecognizer.h"
 #include "ImageIO.h"

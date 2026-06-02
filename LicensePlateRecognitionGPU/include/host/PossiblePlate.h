@@ -1,5 +1,3 @@
-// PossiblePlate.h
-
 #pragma once
 #include "Types.h"
 #include <string>
@@ -9,8 +7,6 @@ public:
     RotatedRect rrLocationOfPlateInScene;
     std::string strChars;
 
-    // Index into PipelineContext::plateBuffers — set by SceneAnalyzer,
-    // read by PlateRecognizer.  -1 means the plate was rejected.
     int poolSlot  = -1;
     int plateBgrW = 0;
     int plateBgrH = 0;

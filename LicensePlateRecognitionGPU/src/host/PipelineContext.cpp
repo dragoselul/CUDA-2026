@@ -1,9 +1,5 @@
-// PipelineContext.cpp
-// Allocate, resize, and destroy all persistent GPU / pinned-host resources.
-
 #include "PipelineContext.h"
 
-// ─── PlateBuffer ─────────────────────────────────────────────────────────────
 void PlateBuffer::allocate()
 {
     preproc = allocPreprocessBuffers(MAX_PLATE_W, MAX_PLATE_H);
@@ -13,10 +9,8 @@ void PlateBuffer::allocate()
     cudaMalloc(&d_thresh_big,   (size_t)MAX_PLATE_THRESH_W * MAX_PLATE_THRESH_H);
     cudaMalloc(&d_thresh_otsu,  (size_t)MAX_PLATE_THRESH_W * MAX_PLATE_THRESH_H);
 
-    // Pre-allocated CCL workspace — sized for the post-resize plate image
     plateWS = allocWorkspace(MAX_PLATE_THRESH_W * MAX_PLATE_THRESH_H);
 
-    // Device buffer + pinned host mirror for CCL filter output
     cudaMalloc    (&d_filtered,     CCL_MAX_FILTERED * sizeof(FilteredBlob));
     cudaMalloc    (&d_num_filtered, sizeof(int));
     cudaMallocHost(&h_filtered,     CCL_MAX_FILTERED * sizeof(FilteredBlob));
@@ -41,18 +35,15 @@ void PlateBuffer::free()
     *this = {};
 }
 
-// ─── SceneBuffer ─────────────────────────────────────────────────────────────
 void SceneBuffer::allocate()
 {
-    // Device buffer: loader uploads via cudaMemcpyAsync on transferStream.
+    //loader uploads via cudaMemcpyAsync on transferStream.
     cudaMalloc(&d_scene_bgr,    (size_t)SCENE_W * SCENE_H * 3);
     cudaMalloc(&d_scene_thresh, (size_t)SCENE_W * SCENE_H);
     scenePreproc = allocPreprocessBuffers(SCENE_W, SCENE_H);
 
-    // Pre-allocated CCL workspace — sized for the full scene image
     sceneWS = allocWorkspace(SCENE_W * SCENE_H);
 
-    // Device buffer + pinned host mirror for CCL filter output
     cudaMalloc    (&d_filtered,     CCL_MAX_FILTERED * sizeof(FilteredBlob));
     cudaMalloc    (&d_num_filtered, sizeof(int));
     cudaMallocHost(&h_filtered,     CCL_MAX_FILTERED * sizeof(FilteredBlob));
@@ -70,7 +61,6 @@ void SceneBuffer::free()
     *this = {};
 }
 
-// ─── PipelineContext ──────────────────────────────────────────────────────────
 PipelineContext PipelineContext::create(int maxPlates)
 {
     PipelineContext ctx;

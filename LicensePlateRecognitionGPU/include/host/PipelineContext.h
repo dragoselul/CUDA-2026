@@ -1,10 +1,3 @@
-// PipelineContext.h
-// Owns all persistent GPU resources for the license-plate pipeline:
-//   - Per-plate buffer pool (pre-allocated to avoid cudaMalloc in hot path)
-//   - CCL workspaces (pre-allocated, one per slot — eliminates per-frame malloc)
-//   - CUDA streams (1 scene stream + 1 transfer stream + maxPlates plate streams)
-//   - Pinned host mirrors for fast async D2H transfers
-
 #pragma once
 #include "Types.h"
 #include "CCL.cuh"
@@ -13,7 +6,6 @@
 #include <vector>
 #include <cuda_runtime.h>
 
-// ─── Sizing constants ─────────────────────────────────────────────────────────
 static constexpr int SCENE_W             = 1280;
 static constexpr int SCENE_H             = 720;
 static constexpr int MAX_PLATE_W         = 600;
@@ -23,7 +15,7 @@ static constexpr int MAX_PLATE_THRESH_H  = (int)(MAX_PLATE_H  * 1.6f + 1);  // 3
 static constexpr int MAX_CHARS_PER_PLATE = 20;
 static constexpr int NUM_SCENE_SLOTS     = 4;   // ping-pong depth
 
-// ─── Per-plate GPU / pinned buffer slot ──────────────────────────────────────
+// Per-plate GPU / pinned buffer slot
 struct PlateBuffer {
     // Preprocessing intermediates (MAX_PLATE_W × MAX_PLATE_H each)
     PreprocessBuffers preproc;
@@ -40,7 +32,7 @@ struct PlateBuffer {
     // After Otsu threshold (binary)         [MAX_PLATE_THRESH_W × MAX_PLATE_THRESH_H]
     unsigned char* d_thresh_otsu = nullptr;
 
-    // Pre-allocated CCL workspace (eliminates per-frame cudaMalloc)
+    // Pre-allocated CCL workspace
     CCLWorkspace   plateWS       = {};
 
     // CCL filter output — device buffer + pinned host mirror
@@ -59,16 +51,16 @@ struct PlateBuffer {
     void free();
 };
 
-// ─── Scene-level buffers (NUM_SCENE_SLOTS sets, ping-pong) ───────────────────
+// Scene-level buffers (NUM_SCENE_SLOTS sets, ping-pong)
 struct SceneBuffer {
-    // Scene image: device buffer, uploaded via cudaMemcpyAsync from loader
+    // Scene image: device buffer
     unsigned char* d_scene_bgr    = nullptr;  // device [SCENE_W × SCENE_H × 3]
 
     // Device-only intermediate
     unsigned char* d_scene_thresh = nullptr;  // device [SCENE_W × SCENE_H]
     PreprocessBuffers scenePreproc = {};
 
-    // Pre-allocated CCL workspace (eliminates per-frame cudaMalloc)
+    // Pre-allocated CCL workspace
     CCLWorkspace   sceneWS         = {};
 
     // CCL filter output — device buffer + pinned host mirror
@@ -81,7 +73,7 @@ struct SceneBuffer {
     void free();
 };
 
-// ─── PipelineContext ──────────────────────────────────────────────────────────
+// PipelineContext
 struct PipelineContext {
     int maxPlates = 0;
 

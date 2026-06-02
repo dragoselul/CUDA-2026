@@ -1,7 +1,3 @@
-// CharGrouping.h
-// Shared geometric helpers used by both SceneAnalyzer and PlateRecognizer.
-// All functions are pure (no global state) and CPU-only.
-
 #pragma once
 #include "PossibleChar.h"
 #include "CCL.cuh"
@@ -9,7 +5,6 @@
 #include <vector>
 #include <cmath>
 
-// ─── Filter thresholds (character geometry) ───────────────────────────────────
 static constexpr int    MIN_NUMBER_OF_MATCHING_CHARS = 3;
 static constexpr double MIN_DIAG_MULTIPLE_AWAY       = 0.3;
 static constexpr double MAX_DIAG_MULTIPLE_AWAY       = 5.0;
@@ -18,13 +13,11 @@ static constexpr double MAX_CHANGE_IN_WIDTH          = 0.8;
 static constexpr double MAX_CHANGE_IN_HEIGHT         = 0.2;
 static constexpr double MAX_ANGLE_BETWEEN_CHARS      = 12.0;
 
-// Convert a GPU-filtered blob to a PossibleChar (CPU).
 inline PossibleChar blobToChar(const FilteredBlob& b)
 {
     return PossibleChar({ b.x, b.y, b.width, b.height }, b.compactId);
 }
 
-// Convert the first `count` blobs to a PossibleChar vector.
 inline std::vector<PossibleChar> blobsToChars(const FilteredBlob* blobs, int count)
 {
     std::vector<PossibleChar> out;

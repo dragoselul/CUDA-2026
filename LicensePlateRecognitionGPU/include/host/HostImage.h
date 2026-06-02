@@ -46,7 +46,6 @@ struct HostImage {
         return *this;
     }
 
-    // Access a pixel: image(x, y)
     unsigned char* ptr(int x, int y) {
         return data + (y * step) + (x * channels);
     }
