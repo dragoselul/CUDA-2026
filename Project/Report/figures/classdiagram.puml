@@ -1,0 +1,123 @@
+@startuml classdiagram
+!theme plain
+skinparam defaultFontName Helvetica
+skinparam ClassFontSize 10
+skinparam ClassAttributeFontSize 9
+skinparam ClassBorderColor #4A6FA5
+skinparam ClassBackgroundColor #EEF3FA
+skinparam ClassHeaderBackgroundColor #4A6FA5
+skinparam ClassHeaderFontColor #FFFFFF
+skinparam ClassHeaderFontSize 11
+skinparam PackageBorderColor #888
+skinparam PackageBackgroundColor #FAFAFA
+skinparam ArrowColor #333
+skinparam ArrowThickness 1.2
+skinparam TitleFontSize 12
+skinparam TitleFontStyle bold
+skinparam Nodesep 30
+skinparam Ranksep 45
+left to right direction
+
+title GPU License Plate Recognition — Module Architecture
+
+' ── Layer 1: host control ───────────────────────────────────────────────
+package "1. Host control" #FAFAFA {
+  class Main {
+    +main(argc, argv) : int
+    -runLoader()  <<thread>>
+    -uploadToGPU(slot)
+  }
+  class LoaderQueue {
+    items : deque<HostImage>
+  }
+  class PipelineContext {
+    sceneStream, transferStream
+    plateStreams[N]
+    uploadDone[4]
+    +create(maxPlates)
+    +destroy()
+  }
+}
+
+' ── Layer 2: pre-allocated buffers ──────────────────────────────────────
+package "2. Pre-allocated buffers" #F0F4FA {
+  class SceneBuffer {
+    d_scene_bgr, d_scene_thresh
+    sceneWS : CCLWorkspace
+    d_filtered / h_filtered
+  }
+  class PlateBuffer {
+    d_plate_bgr, d_thresh_otsu
+    plateWS : CCLWorkspace
+    d_queries, d_knn_results
+  }
+  class CCLWorkspace {
+    d_label, d_compactMap
+    d_changed, d_numComp
+    d_stats
+  }
+}
+
+' ── Layer 3: pipeline drivers (execution order) ─────────────────────────
+package "3. Pipeline drivers" #F5F5F5 {
+  class SceneAnalyzer {
+    +detectPlates(sb, ctx)
+  }
+  class PlateRecognizer {
+    +recognizePlates(plates, ctx)
+  }
+}
+
+' ── Layer 4: GPU kernel modules (pipeline order) ────────────────────────
+package "4. GPU kernel modules" #F5F5F5 {
+  class Preprocess {
+    +preprocessDevice()
+    ~value, erode/dilate
+    ~adaptiveThreshold
+  }
+  class CCL {
+    +runCCLWithFilter(ws, allowCoop)
+    ~PropagateCoopKernel  <<coop>>
+    ~PropagateKernel  <<fallback>>
+    ~flatten/compact/stats/filter
+  }
+  class ImageOps {
+    +runBatchWarpCrop()
+    +runCharROIResize()
+  }
+  class OtsuThreshold {
+    +runOtsuThreshold()
+  }
+  class KNN {
+    +loadKNNModel()
+    +runKNNDevice()  k=1
+  }
+}
+
+' ── ownership ───────────────────────────────────────────────────────────
+Main            --> LoaderQueue
+Main            --> PipelineContext
+Main            --> SceneAnalyzer
+Main            --> PlateRecognizer
+PipelineContext *-- SceneBuffer
+PipelineContext *-- PlateBuffer
+SceneBuffer     *-- CCLWorkspace
+PlateBuffer     *-- CCLWorkspace
+
+' ── data flow down the pipeline ─────────────────────────────────────────
+SceneAnalyzer   ..> SceneBuffer
+SceneAnalyzer   --> Preprocess
+SceneAnalyzer   --> CCL
+SceneAnalyzer   --> ImageOps : warp-crop
+PlateRecognizer ..> PlateBuffer
+PlateRecognizer --> Preprocess
+PlateRecognizer --> ImageOps : resize
+PlateRecognizer --> OtsuThreshold
+PlateRecognizer --> CCL
+PlateRecognizer --> KNN
+CCL             ..> CCLWorkspace
+
+' ── stage 1 (scene) hands plates to stage 2 (per-plate) ─────────────────
+SceneAnalyzer   ==> PlateRecognizer : plate candidates
+
+@enduml

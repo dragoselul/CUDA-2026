@@ -1,0 +1,87 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper, total={6.5in, 9.5in}]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{multicol}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{lscape}
+\usepackage{tikz}
+
+% Allow TeX extra stretch to handle long monospace identifiers
+\emergencystretch=4em
+
+% ── hyperref setup ──────────────────────────────────────────────────────────
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=blue!60!black
+}
+
+% ── code listing style ───────────────────────────────────────────────────────
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  frame=single,
+  breaklines=true,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{gray},
+  stringstyle=\color{red!70!black},
+  showstringspaces=false,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=6pt
+}
+
+% ── title ────────────────────────────────────────────────────────────────────
+\title{
+    \textbf{CUDA Special Course} \\
+    \textbf{Project Report} \\[2.5em]
+    \includegraphics[width=0.18\textwidth]{../ProjectDescription/images/DTU.png}\\[2.5em]
+    \textbf{License Plate Recognition on GPU using CUDA}
+}
+
+\author{
+    \textbf{Dragos-Daniel Bonaparte}\\
+    s256878@student.dtu.dk
+}
+
+\date{May 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+\setcounter{page}{1}
+\tableofcontents
+\newpage
+
+\begin{abstract}
+\noindent
+
+This project ports a single-threaded OpenCV license-plate pipeline to CUDA C++. 
+Every stage becomes a GPU kernel with no OpenCV dependency.
+The goal of the project is to see how much speedup can be achieved by moving the computation to the GPU while retaining accuracy. The dataset contains 550 images, some which are easy to read and see, and some that are in bad lighting conditions or blurry. The pipeline achieves 932.6 img/s on an RTX 4070 Max-Q and 727.4 img/s on a GH200 — 6.50× and 5.07× 
+over the CPU single-threaded baseline.
+The surprising findings are that at 1280×720 the workload is clock-bound, not bandwidth- or SM-bound. 
+The image fits in L2 and leaves most of the GH200's 132 SMs idle, so the smaller, higher-clocked GPU stays ≈1.29× ahead; the GH200 would most likely win at processing images with much larger resolutions. 
+Against a hand-labelled ground truth, the GPU unfortunately reads plates less accurately than the OpenCV reference.
+
+
+\end{abstract}
+
+\newpage
+
+\input{report}
+
+\end{document}
